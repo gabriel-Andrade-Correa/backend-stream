@@ -87,12 +87,32 @@ async function enrichTitlesWithProviders(titles) {
 
 async function getTrending() {
   ensureTmdbConfigured();
-  const { data } = await http.get('/trending/all/day');
+  const [trendWeek, moviePopular, tvPopular] = await Promise.all([
+    http.get('/trending/all/week'),
+    http.get('/movie/popular', { params: { page: 1 } }),
+    http.get('/tv/popular', { params: { page: 1 } })
+  ]);
 
-  return (data.results || [])
+  const weekItems = (trendWeek.data.results || [])
     .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-    .slice(0, 20)
     .map(normalizeTitle);
+
+  const movieItems = (moviePopular.data.results || []).map((item) =>
+    normalizeTitle({ ...item, media_type: 'movie' })
+  );
+
+  const tvItems = (tvPopular.data.results || []).map((item) =>
+    normalizeTitle({ ...item, media_type: 'tv' })
+  );
+
+  const unique = new Map();
+  [...weekItems, ...movieItems, ...tvItems].forEach((item) => {
+    if (!unique.has(item.id)) {
+      unique.set(item.id, item);
+    }
+  });
+
+  return Array.from(unique.values()).slice(0, 60);
 }
 
 async function searchTitles(query) {
