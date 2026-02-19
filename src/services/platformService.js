@@ -7,15 +7,17 @@
 ];
 
 function mapPlatformsToTitle(title) {
-  const seeds = ['Netflix', 'HBO Max', 'Prime Video', 'Disney+'];
-  const idxA = title.id % seeds.length;
-  const idxB = (title.id + 1) % seeds.length;
-  const availableOn = [seeds[idxA], seeds[idxB]];
+  const rawProviders = Array.isArray(title.providerNames) ? title.providerNames : [];
+  const availableOn = Array.from(
+    new Set(rawProviders.map(normalizeProviderName).filter(Boolean))
+  );
 
   const deepLinks = availableOn.map((name) => ({
     platform: name,
     app: getPlatformDeepLink(name, title.title),
-    web: getPlatformWebLink(name, title.title)
+    web: getPlatformWebLink(name, title.title),
+    directApp: null,
+    directWeb: title.providerLink || null
   }));
 
   return {
@@ -23,6 +25,24 @@ function mapPlatformsToTitle(title) {
     availableOn,
     deepLinks
   };
+}
+
+function normalizeProviderName(name) {
+  const normalized = String(name || '').trim();
+
+  const aliasMap = {
+    Max: 'HBO Max',
+    'HBO Max': 'HBO Max',
+    Netflix: 'Netflix',
+    'Amazon Prime Video': 'Prime Video',
+    'Prime Video': 'Prime Video',
+    'Disney Plus': 'Disney+',
+    'Disney+': 'Disney+',
+    'Apple TV Plus': 'Apple TV+',
+    'Apple TV+': 'Apple TV+'
+  };
+
+  return aliasMap[normalized] || normalized;
 }
 
 function getPlatformDeepLink(platformName, title) {
@@ -55,5 +75,6 @@ module.exports = {
   platforms,
   mapPlatformsToTitle,
   getPlatformWebLink,
-  getPlatformDeepLink
+  getPlatformDeepLink,
+  normalizeProviderName
 };

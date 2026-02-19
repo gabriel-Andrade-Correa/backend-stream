@@ -18,7 +18,8 @@ async function getPlatforms(req, res, next) {
 async function getTrending(req, res, next) {
   try {
     const trending = await tmdbService.getTrending();
-    const withPlatforms = trending.map(mapPlatformsToTitle);
+    const enriched = await tmdbService.enrichTitlesWithProviders(trending);
+    const withPlatforms = enriched.map(mapPlatformsToTitle);
     res.json({ data: withPlatforms });
   } catch (error) {
     next(error);
@@ -33,7 +34,8 @@ async function search(req, res, next) {
     }
 
     const results = await tmdbService.searchTitles(query);
-    const withPlatforms = results.map(mapPlatformsToTitle);
+    const enriched = await tmdbService.enrichTitlesWithProviders(results);
+    const withPlatforms = enriched.map(mapPlatformsToTitle);
     await userService.addSearchHistory(query);
 
     res.json({ data: withPlatforms });
@@ -51,7 +53,8 @@ async function getTitle(req, res, next) {
       return res.status(404).json({ message: 'Título não encontrado' });
     }
 
-    res.json({ data: mapPlatformsToTitle(title) });
+    const enriched = await tmdbService.enrichTitleWithProviders(title);
+    res.json({ data: mapPlatformsToTitle(enriched) });
   } catch (error) {
     next(error);
   }
@@ -61,7 +64,8 @@ async function recommendations(req, res, next) {
   try {
     const preferences = await userService.getPreferences(1);
     const trending = await tmdbService.getTrending();
-    const withPlatforms = trending.map(mapPlatformsToTitle);
+    const enriched = await tmdbService.enrichTitlesWithProviders(trending);
+    const withPlatforms = enriched.map(mapPlatformsToTitle);
     const recommended = getRecommendations(
       withPlatforms,
       preferences.favoriteGenre,
