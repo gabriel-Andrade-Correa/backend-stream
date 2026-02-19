@@ -21,6 +21,14 @@ function isAppScheme(value) {
   return typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
 
+function getSourceTypeRank(source) {
+  const sourceType = String(source?.type || '').toLowerCase();
+  if (sourceType === 'sub') return 3;
+  if (sourceType === 'free' || sourceType === 'tve') return 2;
+  if (sourceType === 'buy' || sourceType === 'rent') return 1;
+  return 1;
+}
+
 function getSourcePlatformName(source) {
   const raw = source?.name || source?.source_name || source?.display_name || '';
   return normalizeProviderName(raw);
@@ -50,14 +58,20 @@ async function findWatchmodeTitleIdByTmdb(client, tmdbId, mediaType) {
 
 function mergeDirectLinks(current, next) {
   if (!next) return current;
+  if (!current) return next;
+
+  if ((next.rank || 0) > (current.rank || 0)) {
+    return next;
+  }
 
   return {
-    app: next.app || current?.app || null,
-    web: next.web || current?.web || null
+    app: current.app || next.app || null,
+    web: current.web || next.web || null,
+    rank: current.rank || next.rank || 0
   };
 }
 
-async function getDirectLinksByPlatform({ tmdbId, mediaType }) {
+async function getDirectLinksByPlatform({ tmdbId, mediaType, allowedPlatforms = [] }) {
   if (!hasWatchmodeConfig() || !tmdbId || (mediaType !== 'movie' && mediaType !== 'tv')) {
     return {};
   }
@@ -76,23 +90,35 @@ async function getDirectLinksByPlatform({ tmdbId, mediaType }) {
 
     const sources = Array.isArray(data) ? data : [];
     const links = {};
+    const allowedSet = new Set((allowedPlatforms || []).map((name) => normalizeProviderName(name)));
 
     sources.forEach((source) => {
+      const rank = getSourceTypeRank(source);
       const platform = getSourcePlatformName(source);
       if (!platform) return;
+      if (allowedSet.size > 0 && !allowedSet.has(platform)) return;
 
       const webUrl = isHttpUrl(source?.web_url) ? source.web_url : null;
       if (!webUrl) return;
 
       const next = {
         app: pickAppUrl(source),
-        web: webUrl
+        web: webUrl,
+        rank
       };
 
       links[platform] = mergeDirectLinks(links[platform], next);
     });
 
-    return links;
+    const normalizedLinks = {};
+    Object.entries(links).forEach(([platform, data]) => {
+      normalizedLinks[platform] = {
+        app: data?.app || null,
+        web: data?.web || null
+      };
+    });
+
+    return normalizedLinks;
   } catch (error) {
     return {};
   }

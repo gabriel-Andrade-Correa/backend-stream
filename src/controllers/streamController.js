@@ -1,4 +1,4 @@
-const tmdbService = require('../services/tmdbService');
+Ôªøconst tmdbService = require('../services/tmdbService');
 const {
   platforms,
   mapPlatformsToTitle,
@@ -47,20 +47,21 @@ async function catalogByPlatform(req, res, next) {
   try {
     const name = String(req.query.name || '').trim();
     if (!name) {
-      return res.status(400).json({ message: 'Informe o par‚metro name com a plataforma' });
+      return res.status(400).json({ message: 'Informe o par√¢metro name com a plataforma' });
     }
 
     const normalized = normalizeProviderName(name);
     const providerIds = getProviderIdsByPlatformName(normalized);
     if (!providerIds.length) {
-      return res.status(404).json({ message: 'Plataforma n„o suportada para cat·logo dedicado' });
+      return res.status(404).json({ message: 'Plataforma n√£o suportada para cat√°logo dedicado' });
     }
 
-    const pages = Number(req.query.pages || 3);
-    const limit = Number(req.query.limit || 240);
-    const catalog = await tmdbService.getCatalogByProviders(providerIds, normalized, pages, limit);
+    const page = Math.max(1, Number(req.query.page || 1));
+    const pages = Math.max(1, Number(req.query.pages || 2));
+    const limit = Math.max(20, Number(req.query.limit || 240));
+    const catalog = await tmdbService.getCatalogByProviders(providerIds, normalized, pages, limit, page);
     const withPlatforms = catalog.map(mapPlatformsToTitle);
-    res.json({ data: withPlatforms, meta: { platform: normalized } });
+    res.json({ data: withPlatforms, meta: { platform: normalized, page, pages, limit } });
   } catch (error) {
     next(error);
   }
@@ -70,7 +71,7 @@ async function search(req, res, next) {
   try {
     const query = String(req.query.q || '').trim();
     if (!query) {
-      return res.status(400).json({ message: 'Informe o par‚metro q para busca' });
+      return res.status(400).json({ message: 'Informe o par√¢metro q para busca' });
     }
 
     const results = await tmdbService.searchTitles(query);
@@ -93,13 +94,14 @@ async function getTitle(req, res, next) {
     const title = await tmdbService.getTitleById(id, mediaType);
 
     if (!title) {
-      return res.status(404).json({ message: 'TÌtulo n„o encontrado' });
+      return res.status(404).json({ message: 'T√≠tulo n√£o encontrado' });
     }
 
     const enriched = await tmdbService.enrichTitleWithProviders(title);
     const directLinksByPlatform = await getDirectLinksByPlatform({
       tmdbId: enriched.id,
-      mediaType: enriched.mediaType
+      mediaType: enriched.mediaType,
+      allowedPlatforms: enriched.providerNames || []
     });
 
     res.json({
@@ -178,3 +180,4 @@ module.exports = {
   updatePreferences,
   recentSearches
 };
+

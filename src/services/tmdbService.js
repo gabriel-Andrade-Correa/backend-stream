@@ -55,14 +55,14 @@ function dedupeTitles(items) {
   return Array.from(map.values());
 }
 
-async function fetchPagedList(endpoint, mediaType, pages, extraParams = {}) {
+async function fetchPagedList(endpoint, mediaType, pages, extraParams = {}, startPage = 1) {
   const list = [];
 
-  for (let page = 1; page <= pages; page += 1) {
+  for (let currentPage = startPage; currentPage < startPage + pages; currentPage += 1) {
     const { data } = await http.get(endpoint, {
       params: {
         ...extraParams,
-        page
+        page: currentPage
       }
     });
 
@@ -75,20 +75,20 @@ async function fetchPagedList(endpoint, mediaType, pages, extraParams = {}) {
   return list;
 }
 
-async function fetchDiscoverByProvider(providerId, providerName, pages) {
+async function fetchDiscoverByProvider(providerId, providerName, pages, startPage = 1) {
   const [movies, tv] = await Promise.all([
     fetchPagedList('/discover/movie', 'movie', pages, {
       watch_region: env.tmdbWatchRegion,
       with_watch_providers: String(providerId),
       with_watch_monetization_types: 'flatrate',
       sort_by: 'popularity.desc'
-    }),
+    }, startPage),
     fetchPagedList('/discover/tv', 'tv', pages, {
       watch_region: env.tmdbWatchRegion,
       with_watch_providers: String(providerId),
       with_watch_monetization_types: 'flatrate',
       sort_by: 'popularity.desc'
-    })
+    }, startPage)
   ]);
 
   return [...movies, ...tv].map((item) => ({
@@ -97,15 +97,16 @@ async function fetchDiscoverByProvider(providerId, providerName, pages) {
   }));
 }
 
-async function getCatalogByProviders(providerIds, platformName, pages = 3, maxItems = 240) {
+async function getCatalogByProviders(providerIds, platformName, pages = 3, maxItems = 240, startPage = 1) {
   ensureTmdbConfigured();
   const safePages = Math.max(1, Math.min(8, pages));
   const safeMax = Math.max(20, Math.min(800, maxItems));
+  const safeStartPage = Math.max(1, Math.min(80, Number(startPage) || 1));
   const ids = Array.isArray(providerIds) ? providerIds.filter(Boolean) : [];
   if (!ids.length) return [];
 
   const discovered = await Promise.all(
-    ids.map((providerId) => fetchDiscoverByProvider(providerId, platformName, safePages))
+    ids.map((providerId) => fetchDiscoverByProvider(providerId, platformName, safePages, safeStartPage))
   );
 
   return dedupeTitles(discovered.flat()).slice(0, safeMax);
