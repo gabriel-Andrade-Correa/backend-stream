@@ -1,5 +1,10 @@
 ﻿const tmdbService = require('../services/tmdbService');
-const { platforms, mapPlatformsToTitle } = require('../services/platformService');
+const {
+  platforms,
+  mapPlatformsToTitle,
+  normalizeProviderName,
+  getProviderIdsByPlatformName
+} = require('../services/platformService');
 const { getRecommendations } = require('../services/recommendationService');
 const userService = require('../services/userService');
 
@@ -26,6 +31,40 @@ async function getTrending(req, res, next) {
   }
 }
 
+async function mostWatched(req, res, next) {
+  try {
+    const titles = await tmdbService.getMostWatchedNow();
+    const enriched = await tmdbService.enrichTitlesWithProviders(titles);
+    const withPlatforms = enriched.map(mapPlatformsToTitle);
+    res.json({ data: withPlatforms });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function catalogByPlatform(req, res, next) {
+  try {
+    const name = String(req.query.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ message: 'Informe o parâmetro name com a plataforma' });
+    }
+
+    const normalized = normalizeProviderName(name);
+    const providerIds = getProviderIdsByPlatformName(normalized);
+    if (!providerIds.length) {
+      return res.status(404).json({ message: 'Plataforma não suportada para catálogo dedicado' });
+    }
+
+    const pages = Number(req.query.pages || 3);
+    const limit = Number(req.query.limit || 240);
+    const catalog = await tmdbService.getCatalogByProviders(providerIds, normalized, pages, limit);
+    const withPlatforms = catalog.map(mapPlatformsToTitle);
+    res.json({ data: withPlatforms, meta: { platform: normalized } });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function search(req, res, next) {
   try {
     const query = String(req.query.q || '').trim();
@@ -47,7 +86,10 @@ async function search(req, res, next) {
 async function getTitle(req, res, next) {
   try {
     const { id } = req.params;
-    const title = await tmdbService.getTitleById(id);
+    const mediaType = req.query.mediaType === 'movie' || req.query.mediaType === 'tv'
+      ? req.query.mediaType
+      : undefined;
+    const title = await tmdbService.getTitleById(id, mediaType);
 
     if (!title) {
       return res.status(404).json({ message: 'Título não encontrado' });
@@ -119,6 +161,8 @@ module.exports = {
   health,
   getPlatforms,
   getTrending,
+  mostWatched,
+  catalogByPlatform,
   search,
   getTitle,
   recommendations,

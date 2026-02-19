@@ -1,6 +1,15 @@
 ﻿const { http } = require('../utils/httpClient');
 const { env } = require('../config/env');
 
+const DISCOVER_PROVIDER_HINTS = [
+  { id: 8, name: 'Netflix' },
+  { id: 119, name: 'Prime Video' },
+  { id: 337, name: 'Disney+' },
+  { id: 384, name: 'HBO Max' },
+  { id: 1899, name: 'HBO Max' },
+  { id: 350, name: 'Apple TV+' }
+];
+
 function ensureTmdbConfigured() {
   if (!env.tmdbApiKey) {
     const error = new Error('TMDB_API_KEY não configurada. Defina no arquivo .env do backend.');
@@ -66,6 +75,42 @@ async function fetchPagedList(endpoint, mediaType, pages, extraParams = {}) {
   return list;
 }
 
+async function fetchDiscoverByProvider(providerId, providerName, pages) {
+  const [movies, tv] = await Promise.all([
+    fetchPagedList('/discover/movie', 'movie', pages, {
+      watch_region: env.tmdbWatchRegion,
+      with_watch_providers: String(providerId),
+      with_watch_monetization_types: 'flatrate',
+      sort_by: 'popularity.desc'
+    }),
+    fetchPagedList('/discover/tv', 'tv', pages, {
+      watch_region: env.tmdbWatchRegion,
+      with_watch_providers: String(providerId),
+      with_watch_monetization_types: 'flatrate',
+      sort_by: 'popularity.desc'
+    })
+  ]);
+
+  return [...movies, ...tv].map((item) => ({
+    ...item,
+    providerNames: [providerName]
+  }));
+}
+
+async function getCatalogByProviders(providerIds, platformName, pages = 3, maxItems = 240) {
+  ensureTmdbConfigured();
+  const safePages = Math.max(1, Math.min(8, pages));
+  const safeMax = Math.max(20, Math.min(800, maxItems));
+  const ids = Array.isArray(providerIds) ? providerIds.filter(Boolean) : [];
+  if (!ids.length) return [];
+
+  const discovered = await Promise.all(
+    ids.map((providerId) => fetchDiscoverByProvider(providerId, platformName, safePages))
+  );
+
+  return dedupeTitles(discovered.flat()).slice(0, safeMax);
+}
+
 async function getWatchProviders(mediaType, id) {
   const { data } = await http.get(`/${mediaType}/${id}/watch/providers`);
   const results = data.results || {};
@@ -74,7 +119,7 @@ async function getWatchProviders(mediaType, id) {
 
   const providerItems = uniqueProviders([
     ...(regionData?.flatrate || []),
-    ...(regionData?.ads || [])
+    ...(env.tmdbIncludeAds ? (regionData?.ads || []) : [])
   ]);
 
   return {
@@ -87,6 +132,15 @@ async function getWatchProviders(mediaType, id) {
 async function enrichTitleWithProviders(title) {
   if (!title?.id || !title?.mediaType) {
     return { ...title, providerNames: [], providerLink: null, watchRegion: null };
+  }
+
+  if (!env.tmdbEnrichFullProviders && Array.isArray(title.providerNames) && title.providerNames.length) {
+    return {
+      ...title,
+      providerNames: title.providerNames,
+      providerLink: null,
+      watchRegion: env.tmdbWatchRegion
+    };
   }
 
   try {
@@ -123,15 +177,27 @@ async function enrichTitlesWithProviders(titles) {
 
 async function getTrending() {
   ensureTmdbConfigured();
-  const pages = Math.max(1, env.tmdbCatalogPages || 3);
-  const maxItems = Math.max(30, env.tmdbCatalogMaxItems || 180);
+  const pages = Math.max(1, env.tmdbCatalogPages || 5);
+  const maxItems = Math.max(80, env.tmdbCatalogMaxItems || 420);
 
-  const [trendingItems, moviePopularItems, tvPopularItems, movieTopRatedItems, tvTopRatedItems] = await Promise.all([
+  const [
+    trendingItems,
+    moviePopularItems,
+    tvPopularItems,
+    movieTopRatedItems,
+    tvTopRatedItems,
+    discoverLists
+  ] = await Promise.all([
     fetchPagedList('/trending/all/week', null, Math.min(2, pages)),
     fetchPagedList('/movie/popular', 'movie', pages),
     fetchPagedList('/tv/popular', 'tv', pages),
     fetchPagedList('/movie/top_rated', 'movie', Math.min(2, pages)),
-    fetchPagedList('/tv/top_rated', 'tv', Math.min(2, pages))
+    fetchPagedList('/tv/top_rated', 'tv', Math.min(2, pages)),
+    Promise.all(
+      DISCOVER_PROVIDER_HINTS.map((provider) =>
+        fetchDiscoverByProvider(provider.id, provider.name, Math.min(3, pages))
+      )
+    )
   ]);
 
   return dedupeTitles([
@@ -139,8 +205,26 @@ async function getTrending() {
     ...moviePopularItems,
     ...tvPopularItems,
     ...movieTopRatedItems,
-    ...tvTopRatedItems
+    ...tvTopRatedItems,
+    ...discoverLists.flat()
   ]).slice(0, maxItems);
+}
+
+async function getMostWatchedNow() {
+  ensureTmdbConfigured();
+  const [trendMovieDay, trendTvDay, movieNowPlaying, tvOnTheAir] = await Promise.all([
+    fetchPagedList('/trending/movie/day', 'movie', 1),
+    fetchPagedList('/trending/tv/day', 'tv', 1),
+    fetchPagedList('/movie/now_playing', 'movie', 1),
+    fetchPagedList('/tv/on_the_air', 'tv', 1)
+  ]);
+
+  return dedupeTitles([
+    ...trendMovieDay,
+    ...trendTvDay,
+    ...movieNowPlaying,
+    ...tvOnTheAir
+  ]).slice(0, 120);
 }
 
 async function searchTitles(query) {
@@ -160,11 +244,61 @@ async function searchTitles(query) {
     );
   }
 
-  return dedupeTitles(all).slice(0, 100);
+  return dedupeTitles(all).slice(0, 40);
 }
 
-async function getTitleById(id) {
+function mapMovieDetails(item) {
+  return {
+    id: item.id,
+    title: item.title,
+    type: 'filme',
+    mediaType: 'movie',
+    overview: item.overview,
+    poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+    backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null,
+    genreIds: (item.genres || []).map((g) => g.id),
+    genres: (item.genres || []).map((g) => g.name),
+    voteAverage: item.vote_average || 0,
+    popularity: item.popularity || 0
+  };
+}
+
+function mapTvDetails(item) {
+  return {
+    id: item.id,
+    title: item.name,
+    type: 'serie',
+    mediaType: 'tv',
+    overview: item.overview,
+    poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
+    backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null,
+    genreIds: (item.genres || []).map((g) => g.id),
+    genres: (item.genres || []).map((g) => g.name),
+    voteAverage: item.vote_average || 0,
+    popularity: item.popularity || 0
+  };
+}
+
+async function getTitleById(id, mediaType) {
   ensureTmdbConfigured();
+
+  if (mediaType === 'movie') {
+    try {
+      const { data } = await http.get(`/movie/${id}`);
+      return mapMovieDetails(data);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  if (mediaType === 'tv') {
+    try {
+      const { data } = await http.get(`/tv/${id}`);
+      return mapTvDetails(data);
+    } catch (error) {
+      return null;
+    }
+  }
 
   const [movieRes, tvRes] = await Promise.allSettled([
     http.get(`/movie/${id}`),
@@ -172,37 +306,11 @@ async function getTitleById(id) {
   ]);
 
   if (movieRes.status === 'fulfilled') {
-    const item = movieRes.value.data;
-    return {
-      id: item.id,
-      title: item.title,
-      type: 'filme',
-      mediaType: 'movie',
-      overview: item.overview,
-      poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-      backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null,
-      genreIds: (item.genres || []).map((g) => g.id),
-      genres: (item.genres || []).map((g) => g.name),
-      voteAverage: item.vote_average || 0,
-      popularity: item.popularity || 0
-    };
+    return mapMovieDetails(movieRes.value.data);
   }
 
   if (tvRes.status === 'fulfilled') {
-    const item = tvRes.value.data;
-    return {
-      id: item.id,
-      title: item.name,
-      type: 'serie',
-      mediaType: 'tv',
-      overview: item.overview,
-      poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
-      backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null,
-      genreIds: (item.genres || []).map((g) => g.id),
-      genres: (item.genres || []).map((g) => g.name),
-      voteAverage: item.vote_average || 0,
-      popularity: item.popularity || 0
-    };
+    return mapTvDetails(tvRes.value.data);
   }
 
   return null;
@@ -210,6 +318,8 @@ async function getTitleById(id) {
 
 module.exports = {
   getTrending,
+  getMostWatchedNow,
+  getCatalogByProviders,
   searchTitles,
   getTitleById,
   enrichTitleWithProviders,

@@ -6,19 +6,46 @@
   { id: 'apple', name: 'Apple TV+', color: '#A3A3A3' }
 ];
 
+const PROVIDER_IDS_BY_PLATFORM = {
+  Netflix: [8],
+  'HBO Max': [1899, 384],
+  'Prime Video': [119],
+  'Disney+': [337],
+  'Apple TV+': [350]
+};
+
+// Optional direct links for known titles. Fallback remains search links.
+const directLinksByTitle = {
+  arcane: {
+    Netflix: {
+      app: 'nflx://www.netflix.com/title/81435684',
+      web: 'https://www.netflix.com/title/81435684'
+    }
+  },
+  'game of thrones': {
+    'HBO Max': {
+      app: 'hbomax://series/urn:hbo:series:GVU2cggagzYNJjhsJATwo',
+      web: 'https://play.max.com/show/6d6d9f7f-7f8f-4c54-96a6-2f4f44b4a8bc'
+    }
+  }
+};
+
 function mapPlatformsToTitle(title) {
   const rawProviders = Array.isArray(title.providerNames) ? title.providerNames : [];
   const availableOn = Array.from(
     new Set(rawProviders.map(normalizeProviderName).filter(Boolean))
   );
 
-  const deepLinks = availableOn.map((name) => ({
-    platform: name,
-    app: getPlatformDeepLink(name, title.title),
-    web: getPlatformWebLink(name, title.title),
-    directApp: null,
-    directWeb: title.providerLink || null
-  }));
+  const deepLinks = availableOn.map((name) => {
+    const direct = getPlatformDirectLink(title.title, name);
+    return {
+      platform: name,
+      app: getPlatformDeepLink(name, title.title),
+      web: getPlatformWebLink(name, title.title),
+      directApp: direct?.app || null,
+      directWeb: direct?.web || null
+    };
+  });
 
   return {
     ...title,
@@ -34,12 +61,15 @@ function normalizeProviderName(name) {
     Max: 'HBO Max',
     'HBO Max': 'HBO Max',
     Netflix: 'Netflix',
+    'Netflix Standard with Ads': 'Netflix',
     'Amazon Prime Video': 'Prime Video',
     'Prime Video': 'Prime Video',
+    'Amazon Prime Video with Ads': 'Prime Video',
     'Disney Plus': 'Disney+',
     'Disney+': 'Disney+',
     'Apple TV Plus': 'Apple TV+',
-    'Apple TV+': 'Apple TV+'
+    'Apple TV+': 'Apple TV+',
+    'HBO Max Amazon Channel': 'Prime Video'
   };
 
   return aliasMap[normalized] || normalized;
@@ -71,10 +101,22 @@ function getPlatformWebLink(platformName, title) {
   return map[platformName] || `https://www.google.com/search?q=${q}+streaming`;
 }
 
+function getPlatformDirectLink(titleName, platformName) {
+  const key = String(titleName || '').trim().toLowerCase();
+  return directLinksByTitle[key]?.[platformName] || null;
+}
+
+function getProviderIdsByPlatformName(platformName) {
+  const normalized = normalizeProviderName(platformName);
+  return PROVIDER_IDS_BY_PLATFORM[normalized] || [];
+}
+
 module.exports = {
   platforms,
   mapPlatformsToTitle,
   getPlatformWebLink,
   getPlatformDeepLink,
-  normalizeProviderName
+  normalizeProviderName,
+  getPlatformDirectLink,
+  getProviderIdsByPlatformName
 };
