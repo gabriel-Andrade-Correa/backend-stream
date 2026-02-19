@@ -35,15 +35,42 @@ function uniqueProviders(list) {
   return Array.from(map.values());
 }
 
+function dedupeTitles(items) {
+  const map = new Map();
+  (items || []).forEach((item) => {
+    const key = `${item.mediaType}:${item.id}`;
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  });
+  return Array.from(map.values());
+}
+
+async function fetchPagedList(endpoint, mediaType, pages, extraParams = {}) {
+  const list = [];
+
+  for (let page = 1; page <= pages; page += 1) {
+    const { data } = await http.get(endpoint, {
+      params: {
+        ...extraParams,
+        page
+      }
+    });
+
+    const results = data.results || [];
+    results.forEach((item) => {
+      list.push(normalizeTitle({ ...item, media_type: item.media_type || mediaType }));
+    });
+  }
+
+  return list;
+}
+
 async function getWatchProviders(mediaType, id) {
   const { data } = await http.get(`/${mediaType}/${id}/watch/providers`);
   const results = data.results || {};
 
-  const regionData =
-    results[env.tmdbWatchRegion] ||
-    results.US ||
-    results.BR ||
-    null;
+  const regionData = results[env.tmdbWatchRegion] || results.US || results.BR || null;
 
   const providerItems = uniqueProviders([
     ...(regionData?.flatrate || []),
@@ -82,49 +109,58 @@ async function enrichTitleWithProviders(title) {
 
 async function enrichTitlesWithProviders(titles) {
   const list = Array.isArray(titles) ? titles : [];
-  return Promise.all(list.map((title) => enrichTitleWithProviders(title)));
+  const concurrency = Math.max(1, env.tmdbProviderConcurrency || 8);
+  const output = [];
+
+  for (let i = 0; i < list.length; i += concurrency) {
+    const chunk = list.slice(i, i + concurrency);
+    const enrichedChunk = await Promise.all(chunk.map((title) => enrichTitleWithProviders(title)));
+    output.push(...enrichedChunk);
+  }
+
+  return output;
 }
 
 async function getTrending() {
   ensureTmdbConfigured();
-  const [trendWeek, moviePopular, tvPopular] = await Promise.all([
-    http.get('/trending/all/week'),
-    http.get('/movie/popular', { params: { page: 1 } }),
-    http.get('/tv/popular', { params: { page: 1 } })
+  const pages = Math.max(1, env.tmdbCatalogPages || 3);
+  const maxItems = Math.max(30, env.tmdbCatalogMaxItems || 180);
+
+  const [trendingItems, moviePopularItems, tvPopularItems, movieTopRatedItems, tvTopRatedItems] = await Promise.all([
+    fetchPagedList('/trending/all/week', null, Math.min(2, pages)),
+    fetchPagedList('/movie/popular', 'movie', pages),
+    fetchPagedList('/tv/popular', 'tv', pages),
+    fetchPagedList('/movie/top_rated', 'movie', Math.min(2, pages)),
+    fetchPagedList('/tv/top_rated', 'tv', Math.min(2, pages))
   ]);
 
-  const weekItems = (trendWeek.data.results || [])
-    .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-    .map(normalizeTitle);
-
-  const movieItems = (moviePopular.data.results || []).map((item) =>
-    normalizeTitle({ ...item, media_type: 'movie' })
-  );
-
-  const tvItems = (tvPopular.data.results || []).map((item) =>
-    normalizeTitle({ ...item, media_type: 'tv' })
-  );
-
-  const unique = new Map();
-  [...weekItems, ...movieItems, ...tvItems].forEach((item) => {
-    if (!unique.has(item.id)) {
-      unique.set(item.id, item);
-    }
-  });
-
-  return Array.from(unique.values()).slice(0, 60);
+  return dedupeTitles([
+    ...trendingItems,
+    ...moviePopularItems,
+    ...tvPopularItems,
+    ...movieTopRatedItems,
+    ...tvTopRatedItems
+  ]).slice(0, maxItems);
 }
 
 async function searchTitles(query) {
   ensureTmdbConfigured();
+  const pages = Math.max(1, Math.min(3, env.tmdbCatalogPages || 3));
+  const all = [];
 
-  const { data } = await http.get('/search/multi', {
-    params: { query, include_adult: false }
-  });
+  for (let page = 1; page <= pages; page += 1) {
+    const { data } = await http.get('/search/multi', {
+      params: { query, include_adult: false, page }
+    });
 
-  return (data.results || [])
-    .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
-    .map(normalizeTitle);
+    all.push(
+      ...(data.results || [])
+        .filter((item) => item.media_type === 'movie' || item.media_type === 'tv')
+        .map(normalizeTitle)
+    );
+  }
+
+  return dedupeTitles(all).slice(0, 100);
 }
 
 async function getTitleById(id) {
