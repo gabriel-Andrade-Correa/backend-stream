@@ -1,4 +1,4 @@
-Ôªøconst tmdbService = require('../services/tmdbService');
+const tmdbService = require('../services/tmdbService');
 const {
   platforms,
   mapPlatformsToTitle,
@@ -6,6 +6,7 @@ const {
   getProviderIdsByPlatformName
 } = require('../services/platformService');
 const { getRecommendations } = require('../services/recommendationService');
+const { getDirectLinksByPlatform } = require('../services/watchmodeService');
 const userService = require('../services/userService');
 
 async function health(req, res) {
@@ -46,13 +47,13 @@ async function catalogByPlatform(req, res, next) {
   try {
     const name = String(req.query.name || '').trim();
     if (!name) {
-      return res.status(400).json({ message: 'Informe o par√¢metro name com a plataforma' });
+      return res.status(400).json({ message: 'Informe o par‚metro name com a plataforma' });
     }
 
     const normalized = normalizeProviderName(name);
     const providerIds = getProviderIdsByPlatformName(normalized);
     if (!providerIds.length) {
-      return res.status(404).json({ message: 'Plataforma n√£o suportada para cat√°logo dedicado' });
+      return res.status(404).json({ message: 'Plataforma n„o suportada para cat·logo dedicado' });
     }
 
     const pages = Number(req.query.pages || 3);
@@ -69,7 +70,7 @@ async function search(req, res, next) {
   try {
     const query = String(req.query.q || '').trim();
     if (!query) {
-      return res.status(400).json({ message: 'Informe o par√¢metro q para busca' });
+      return res.status(400).json({ message: 'Informe o par‚metro q para busca' });
     }
 
     const results = await tmdbService.searchTitles(query);
@@ -92,11 +93,18 @@ async function getTitle(req, res, next) {
     const title = await tmdbService.getTitleById(id, mediaType);
 
     if (!title) {
-      return res.status(404).json({ message: 'T√≠tulo n√£o encontrado' });
+      return res.status(404).json({ message: 'TÌtulo n„o encontrado' });
     }
 
     const enriched = await tmdbService.enrichTitleWithProviders(title);
-    res.json({ data: mapPlatformsToTitle(enriched) });
+    const directLinksByPlatform = await getDirectLinksByPlatform({
+      tmdbId: enriched.id,
+      mediaType: enriched.mediaType
+    });
+
+    res.json({
+      data: mapPlatformsToTitle(enriched, { directLinksByPlatform })
+    });
   } catch (error) {
     next(error);
   }

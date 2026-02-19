@@ -1,4 +1,4 @@
-﻿const platforms = [
+const platforms = [
   { id: 'netflix', name: 'Netflix', color: '#E50914' },
   { id: 'max', name: 'HBO Max', color: '#6C3BFF' },
   { id: 'prime', name: 'Prime Video', color: '#00A8E1' },
@@ -30,14 +30,25 @@ const directLinksByTitle = {
   }
 };
 
-function mapPlatformsToTitle(title) {
+function mapPlatformsToTitle(title, options = {}) {
   const rawProviders = Array.isArray(title.providerNames) ? title.providerNames : [];
-  const availableOn = Array.from(
-    new Set(rawProviders.map(normalizeProviderName).filter(Boolean))
-  );
+  const fromTmdb = rawProviders.map(normalizeProviderName).filter(Boolean);
+
+  const rawDynamic = options.directLinksByPlatform || {};
+  const normalizedDynamic = {};
+  Object.entries(rawDynamic).forEach(([name, links]) => {
+    const normalizedName = normalizeProviderName(name);
+    if (!normalizedName) return;
+    normalizedDynamic[normalizedName] = links;
+  });
+
+  const availableOn = Array.from(new Set([...fromTmdb, ...Object.keys(normalizedDynamic)]));
 
   const deepLinks = availableOn.map((name) => {
-    const direct = getPlatformDirectLink(title.title, name);
+    const manualDirect = getPlatformDirectLink(title.title, name);
+    const dynamicDirect = normalizedDynamic[name] || null;
+    const direct = dynamicDirect || manualDirect;
+
     return {
       platform: name,
       app: getPlatformDeepLink(name, title.title),
@@ -60,15 +71,20 @@ function normalizeProviderName(name) {
   const aliasMap = {
     Max: 'HBO Max',
     'HBO Max': 'HBO Max',
+    'HBO MAX': 'HBO Max',
     Netflix: 'Netflix',
     'Netflix Standard with Ads': 'Netflix',
     'Amazon Prime Video': 'Prime Video',
     'Prime Video': 'Prime Video',
     'Amazon Prime Video with Ads': 'Prime Video',
+    'Amazon Prime': 'Prime Video',
+    Amazon: 'Prime Video',
+    PrimeVideo: 'Prime Video',
     'Disney Plus': 'Disney+',
     'Disney+': 'Disney+',
     'Apple TV Plus': 'Apple TV+',
     'Apple TV+': 'Apple TV+',
+    AppleTV: 'Apple TV+',
     'HBO Max Amazon Channel': 'Prime Video'
   };
 

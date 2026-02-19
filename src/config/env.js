@@ -13,6 +13,8 @@ const env = {
   tmdbCatalogMaxItems: Number(process.env.TMDB_CATALOG_MAX_ITEMS || 420),
   tmdbProviderConcurrency: Number(process.env.TMDB_PROVIDER_CONCURRENCY || 12),
   tmdbEnrichFullProviders: String(process.env.TMDB_ENRICH_FULL_PROVIDERS || 'false').toLowerCase() === 'true',
+  watchmodeApiKey: process.env.WATCHMODE_API_KEY || '',
+  watchmodeBaseUrl: process.env.WATCHMODE_BASE_URL || 'https://api.watchmode.com/v1',
   cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 300)
 };
 
