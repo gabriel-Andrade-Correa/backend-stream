@@ -8,6 +8,7 @@ router.get('/health', controller.health);
 router.get('/platforms', cacheMiddleware(), controller.getPlatforms);
 router.get('/trending', cacheMiddleware(), controller.getTrending);
 router.get('/most-watched', cacheMiddleware(180), controller.mostWatched);
+router.get('/new-releases', cacheMiddleware(240), controller.newReleases);
 router.get('/catalog/platform', cacheMiddleware(300), controller.catalogByPlatform);
 router.get('/search', cacheMiddleware(120), controller.search);
 router.get('/title/:id', cacheMiddleware(), controller.getTitle);

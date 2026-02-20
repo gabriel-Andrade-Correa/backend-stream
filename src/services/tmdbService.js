@@ -20,6 +20,7 @@ function ensureTmdbConfigured() {
 
 function normalizeTitle(item) {
   const mediaType = item.media_type === 'tv' || item.first_air_date ? 'tv' : 'movie';
+  const releaseDate = item.release_date || item.first_air_date || null;
 
   return {
     id: item.id,
@@ -29,6 +30,7 @@ function normalizeTitle(item) {
     overview: item.overview,
     poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : null,
     backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null,
+    releaseDate,
     genreIds: item.genre_ids || [],
     popularity: item.popularity || 0,
     voteAverage: item.vote_average || 0
@@ -97,6 +99,33 @@ async function fetchDiscoverByProvider(providerId, providerName, pages, startPag
   }));
 }
 
+async function fetchRecentByProvider(providerId, providerName, pages, startPage = 1) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [movies, tv] = await Promise.all([
+    fetchPagedList('/discover/movie', 'movie', pages, {
+      watch_region: env.tmdbWatchRegion,
+      with_watch_providers: String(providerId),
+      with_watch_monetization_types: 'flatrate',
+      sort_by: 'primary_release_date.desc',
+      'release_date.lte': today,
+      include_adult: false
+    }, startPage),
+    fetchPagedList('/discover/tv', 'tv', pages, {
+      watch_region: env.tmdbWatchRegion,
+      with_watch_providers: String(providerId),
+      with_watch_monetization_types: 'flatrate',
+      sort_by: 'first_air_date.desc',
+      'first_air_date.lte': today,
+      include_adult: false
+    }, startPage)
+  ]);
+
+  return [...movies, ...tv].map((item) => ({
+    ...item,
+    providerNames: [providerName]
+  }));
+}
+
 async function getCatalogByProviders(providerIds, platformName, pages = 3, maxItems = 240, startPage = 1) {
   ensureTmdbConfigured();
   const safePages = Math.max(1, Math.min(8, pages));
@@ -110,6 +139,30 @@ async function getCatalogByProviders(providerIds, platformName, pages = 3, maxIt
   );
 
   return dedupeTitles(discovered.flat()).slice(0, safeMax);
+}
+
+function sortByReleaseDateAndPopularity(items) {
+  return [...(items || [])].sort((a, b) => {
+    const aTime = a?.releaseDate ? Date.parse(a.releaseDate) || 0 : 0;
+    const bTime = b?.releaseDate ? Date.parse(b.releaseDate) || 0 : 0;
+    if (aTime !== bTime) return bTime - aTime;
+    return (b?.popularity || 0) - (a?.popularity || 0);
+  });
+}
+
+async function getNewReleasesByProviders(providerIds, platformName, pages = 2, maxItems = 90, startPage = 1) {
+  ensureTmdbConfigured();
+  const safePages = Math.max(1, Math.min(5, pages));
+  const safeMax = Math.max(20, Math.min(300, maxItems));
+  const safeStartPage = Math.max(1, Math.min(50, Number(startPage) || 1));
+  const ids = Array.isArray(providerIds) ? providerIds.filter(Boolean) : [];
+  if (!ids.length) return [];
+
+  const discovered = await Promise.all(
+    ids.map((providerId) => fetchRecentByProvider(providerId, platformName, safePages, safeStartPage))
+  );
+
+  return sortByReleaseDateAndPopularity(dedupeTitles(discovered.flat())).slice(0, safeMax);
 }
 
 async function getWatchProviders(mediaType, id) {
@@ -321,6 +374,7 @@ module.exports = {
   getTrending,
   getMostWatchedNow,
   getCatalogByProviders,
+  getNewReleasesByProviders,
   searchTitles,
   getTitleById,
   enrichTitleWithProviders,

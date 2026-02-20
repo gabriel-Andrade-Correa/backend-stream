@@ -43,6 +43,55 @@ async function mostWatched(req, res, next) {
   }
 }
 
+async function newReleases(req, res, next) {
+  try {
+    const rawPlatforms = String(req.query.platforms || '').trim();
+    const names = rawPlatforms
+      ? rawPlatforms.split(',').map((name) => normalizeProviderName(name.trim())).filter(Boolean)
+      : platforms.map((p) => p.name);
+    const uniqueNames = Array.from(new Set(names));
+    const pages = Math.max(1, Number(req.query.pages || 2));
+    const limit = Math.max(20, Number(req.query.limit || 120));
+
+    const byPlatform = await Promise.all(
+      uniqueNames.map(async (platformName) => {
+        const providerIds = getProviderIdsByPlatformName(platformName);
+        if (!providerIds.length) return [];
+        const titles = await tmdbService.getNewReleasesByProviders(providerIds, platformName, pages, limit, 1);
+        return titles;
+      })
+    );
+
+    const mergedMap = new Map();
+    byPlatform.flat().forEach((item) => {
+      const key = `${item.mediaType || item.type}:${item.id}`;
+      const current = mergedMap.get(key);
+      if (!current) {
+        mergedMap.set(key, item);
+        return;
+      }
+      const currentProviders = Array.isArray(current.providerNames) ? current.providerNames : [];
+      const nextProviders = Array.isArray(item.providerNames) ? item.providerNames : [];
+      mergedMap.set(key, {
+        ...current,
+        providerNames: Array.from(new Set([...currentProviders, ...nextProviders]))
+      });
+    });
+
+    const sorted = Array.from(mergedMap.values()).sort((a, b) => {
+      const aTime = a?.releaseDate ? Date.parse(a.releaseDate) || 0 : 0;
+      const bTime = b?.releaseDate ? Date.parse(b.releaseDate) || 0 : 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return (b?.popularity || 0) - (a?.popularity || 0);
+    });
+
+    const withPlatforms = sorted.map(mapPlatformsToTitle).slice(0, limit);
+    res.json({ data: withPlatforms });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function catalogByPlatform(req, res, next) {
   try {
     const name = String(req.query.name || '').trim();
@@ -172,6 +221,7 @@ module.exports = {
   getPlatforms,
   getTrending,
   mostWatched,
+  newReleases,
   catalogByPlatform,
   search,
   getTitle,
